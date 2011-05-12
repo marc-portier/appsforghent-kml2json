@@ -16,6 +16,9 @@ import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.filefilter.SuffixFileFilter;
+import org.codehaus.jackson.JsonFactory;
+import org.codehaus.jackson.JsonGenerationException;
+import org.codehaus.jackson.JsonGenerator;
 import org.xml.sax.Attributes;
 import org.xml.sax.SAXException;
 import org.xml.sax.helpers.DefaultHandler;
@@ -26,8 +29,10 @@ public class Convertor extends DefaultHandler{
     private final File srcDir;
     private final File tgtDir;
     private final SAXParser parser;
+    private final JsonFactory jsonFact = new JsonFactory();
     
     private Writer output;
+    private JsonGenerator jsonGen;
 
     public Convertor(final File indir, final File outdir, final SAXParser sp) {
         assertDirectoryExists(indir);
@@ -58,7 +63,7 @@ public class Convertor extends DefaultHandler{
         me.workFiles();
     }
 
-    private void workFiles() {
+    private void workFiles() throws SAXException, IOException {
         System.out.println("will work on files in " + srcDir + " and produce output to " + tgtDir);
         final File[] files = srcDir.listFiles((FileFilter)new SuffixFileFilter(".kml"));
         
@@ -70,7 +75,7 @@ public class Convertor extends DefaultHandler{
     }
 
 
-    private void acceptInputFile(final File srcFile) {
+    private void acceptInputFile(final File srcFile) throws SAXException, IOException {
         System.out.println(String.format("starting on file %s", srcFile.getAbsolutePath()));
         
         final File tgtFile = new File(tgtDir, FilenameUtils.getBaseName(srcFile.getName()) + ".json");
@@ -80,10 +85,6 @@ public class Convertor extends DefaultHandler{
         try {
             newOutput(tgtFile);
             parser.parse(srcFile, this);
-        } catch (SAXException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
         } finally {
             doneOutput();
         }
@@ -91,10 +92,18 @@ public class Convertor extends DefaultHandler{
 
     private void newOutput(File f) throws IOException {
         output = new FileWriter(f);
+        jsonGen = jsonFact.createJsonGenerator(output);
+        jsonGen.writeStartArray();
     }
-    private void doneOutput() {
-        IOUtils.closeQuietly(output);
-        output = null;
+    private void doneOutput() throws IOException {
+        try {
+            jsonGen.writeEndArray();
+            jsonGen.close();
+        } finally {
+            IOUtils.closeQuietly(output);
+            output = null;
+            jsonGen = null;
+        }
     }
 
     
@@ -197,6 +206,9 @@ public class Convertor extends DefaultHandler{
         String getNodeType() {
             return nodeType;
         }
+        String getDataType() {
+            return dataType;
+        }
         void setName(String n) {
             name = n;
         }
@@ -206,8 +218,17 @@ public class Convertor extends DefaultHandler{
         void setDescription(String d) {
             description = d;
         }
+        String getDescription() {
+            return description;
+        }
         void setCoordinate(String latLong) {
             coordinate = latLong;
+        }
+        String getCoordinate(){
+            return coordinate;
+        }
+        String getAddress() {
+            return address;
         }
         @Override
         public String toString() {
@@ -232,7 +253,19 @@ public class Convertor extends DefaultHandler{
         }
     }
     
-
+    private void jsonGeneratePlaceMark(ContextNode cn) throws SAXException {
+        try {
+            jsonGen.writeStartObject();
+            jsonGen.writeStringField("name", cn.getName());
+            jsonGen.writeStringField("type", cn.getDataType());
+            jsonGen.writeStringField("description", cn.getDescription());
+            jsonGen.writeStringField("coordinate", cn.getCoordinate());
+            jsonGen.writeStringField("address", cn.getAddress());
+            jsonGen.writeEndObject();
+        } catch (IOException e) {
+            throw new SAXException("error while trying to dump json output for "+ cn , e);
+        }
+    }
 
     private ContextNode reusableFolderContextNode = new ContextNode(FOLDER_ELM){
         public void setName(String n) {
@@ -256,15 +289,15 @@ public class Convertor extends DefaultHandler{
         tree.push(new ContextNode(PLACE_ELM)); 
     }
 
-    private void donePlaceMark() {
+    private void donePlaceMark() throws SAXException {
         final ContextNode cn = tree.pop();
         if ( !(PLACE_ELM.equals(cn.getNodeType()) ) )
             throw new IllegalStateException("wrong contextnode for placemark !");
         
-        // TODO cn.streamOut();
-        System.out.println(cn);
+        jsonGeneratePlaceMark(cn);
     }
     
+
     private static final Pattern LONGLAT_REGEX = Pattern.compile("^(\\d+\\.\\d+),(\\d+\\.\\d+),\\d+ ?$");
     private String longLat2LatLong(String longLat) {
         final Matcher matcher = LONGLAT_REGEX.matcher(longLat);
