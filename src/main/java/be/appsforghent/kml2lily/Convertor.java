@@ -17,7 +17,6 @@ import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.filefilter.SuffixFileFilter;
 import org.codehaus.jackson.JsonFactory;
-import org.codehaus.jackson.JsonGenerationException;
 import org.codehaus.jackson.JsonGenerator;
 import org.xml.sax.Attributes;
 import org.xml.sax.SAXException;
@@ -25,7 +24,7 @@ import org.xml.sax.helpers.DefaultHandler;
 
 public class Convertor extends DefaultHandler{
 
-    
+    private final boolean lilyFormat;
     private final File srcDir;
     private final File tgtDir;
     private final SAXParser parser;
@@ -34,12 +33,13 @@ public class Convertor extends DefaultHandler{
     private Writer output;
     private JsonGenerator jsonGen;
 
-    public Convertor(final File indir, final File outdir, final SAXParser sp) {
+    public Convertor(final File indir, final File outdir, final SAXParser sp, final boolean m) {
         assertDirectoryExists(indir);
         assertDirectoryExists(outdir);
         srcDir = indir;
         tgtDir = outdir;
         parser = sp;
+        lilyFormat = m;
     }
 
     public void assertDirectoryExists(final File dir) {
@@ -59,7 +59,7 @@ public class Convertor extends DefaultHandler{
         spf.setNamespaceAware(true);
         final SAXParser sp = spf.newSAXParser();
 
-        Convertor me = new Convertor(indir, outdir, sp);
+        Convertor me = new Convertor(indir, outdir, sp, true);
         me.workFiles();
     }
 
@@ -93,11 +93,19 @@ public class Convertor extends DefaultHandler{
     private void newOutput(File f) throws IOException {
         output = new FileWriter(f);
         jsonGen = jsonFact.createJsonGenerator(output);
-        jsonGen.writeStartArray();
+        jsonGen.useDefaultPrettyPrinter();
+        jsonGen.writeStartObject();
+        if (lilyFormat) {
+            jsonGen.writeObjectFieldStart("namespaces");
+            jsonGen.writeStringField("be.appsforghent.kml", "k");
+            jsonGen.writeEndObject();
+        }
+        jsonGen.writeArrayFieldStart("records");
     }
     private void doneOutput() throws IOException {
         try {
             jsonGen.writeEndArray();
+            jsonGen.writeEndObject();
             jsonGen.close();
         } finally {
             IOUtils.closeQuietly(output);
@@ -180,15 +188,13 @@ public class Convertor extends DefaultHandler{
         } 
     }
 
-
-
     class ContextNode {
         private String description;
         private String name;
         private String coordinate;
         private String address;
         private String nodeType;
-        private String dataType;
+        private String kind;
         
         private String partStreet;
         private String partNumber;
@@ -198,7 +204,7 @@ public class Convertor extends DefaultHandler{
         }
         public ContextNode(String nt) {
             setNodeType(nt);
-            dataType = type;
+            kind = type;
         }
         private void setNodeType(String nt) {
             nodeType = nt;
@@ -206,8 +212,8 @@ public class Convertor extends DefaultHandler{
         String getNodeType() {
             return nodeType;
         }
-        String getDataType() {
-            return dataType;
+        String getKind() {
+            return kind;
         }
         void setName(String n) {
             name = n;
@@ -232,7 +238,7 @@ public class Convertor extends DefaultHandler{
         }
         @Override
         public String toString() {
-            return String.format("(%15s) %-40s @(%35s)// %s", dataType, '"' + name + '"', coordinate, address);
+            return String.format("(%15s) %-40s @(%35s)// %s", kind, '"' + name + '"', coordinate, address);
         }
         
         void addData(final String k, final String v) {
@@ -254,10 +260,15 @@ public class Convertor extends DefaultHandler{
     }
     
     private void jsonGeneratePlaceMark(ContextNode cn) throws SAXException {
+        if (lilyFormat){
+            jsonGeneratePlaceMarkLilyFormat(cn); 
+            return;
+        }
+        
         try {
             jsonGen.writeStartObject();
             jsonGen.writeStringField("name", cn.getName());
-            jsonGen.writeStringField("type", cn.getDataType());
+            jsonGen.writeStringField("kind", cn.getKind());
             jsonGen.writeStringField("description", cn.getDescription());
             jsonGen.writeStringField("coordinate", cn.getCoordinate());
             jsonGen.writeStringField("address", cn.getAddress());
@@ -267,6 +278,22 @@ public class Convertor extends DefaultHandler{
         }
     }
 
+    private void jsonGeneratePlaceMarkLilyFormat(ContextNode cn) throws SAXException {
+        try {
+            jsonGen.writeStartObject();
+            jsonGen.writeStringField("type", "k$Placemark");
+            jsonGen.writeObjectFieldStart("fields");
+            jsonGen.writeStringField("k$name", cn.getName());
+            jsonGen.writeStringField("k$kind", cn.getKind());
+            jsonGen.writeStringField("k$description", cn.getDescription());
+            jsonGen.writeStringField("k$coordinate", cn.getCoordinate());
+            jsonGen.writeStringField("k$address", cn.getAddress());
+            jsonGen.writeEndObject();
+            jsonGen.writeEndObject();
+        } catch (IOException e) {
+            throw new SAXException("error while trying to dump json output for "+ cn , e);
+        }
+    }
     private ContextNode reusableFolderContextNode = new ContextNode(FOLDER_ELM){
         public void setName(String n) {
             type = n; // Folder tag is used to find the type of things to create.
