@@ -17,6 +17,7 @@ import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.filefilter.SuffixFileFilter;
 import org.codehaus.jackson.JsonFactory;
+import org.codehaus.jackson.JsonGenerationException;
 import org.codehaus.jackson.JsonGenerator;
 import org.xml.sax.Attributes;
 import org.xml.sax.SAXException;
@@ -286,12 +287,19 @@ public class Convertor extends DefaultHandler{
             jsonGen.writeStringField("k$name", cn.getName());
             jsonGen.writeStringField("k$kind", cn.getKind());
             jsonGen.writeStringField("k$description", cn.getDescription());
-            jsonGen.writeStringField("k$coordinate", cn.getCoordinate());
-            jsonGen.writeStringField("k$address", cn.getAddress());
+            jsonGenerateOptionalField("k$coordinate", cn.getCoordinate());
+            jsonGenerateOptionalField("k$address", cn.getAddress());
             jsonGen.writeEndObject();
             jsonGen.writeEndObject();
         } catch (IOException e) {
             throw new SAXException("error while trying to dump json output for "+ cn , e);
+        }
+    }
+
+    public void jsonGenerateOptionalField(final String k, final String v) throws IOException,
+            JsonGenerationException {
+        if (v != null) {
+            jsonGen.writeStringField(k, v);
         }
     }
     private ContextNode reusableFolderContextNode = new ContextNode(FOLDER_ELM){
